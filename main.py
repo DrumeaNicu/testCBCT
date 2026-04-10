@@ -1,72 +1,44 @@
 import html
-import json
 import os
-import re
-import tempfile
+from pathlib import Path
 
 import streamlit as st
-from pydrive2.auth import GoogleAuth
-from pydrive2.drive import GoogleDrive
-from oauth2client.service_account import ServiceAccountCredentials
 
 
 st.set_page_config(
-    page_title="Google Drive Uploader",
+    page_title="Streamlit Uploader",
     page_icon="UH",
     layout="wide",
     initial_sidebar_state="collapsed",
 )
 
 
-DEFAULT_DRIVE_FOLDER_ID = "1SR5ynLevtLLtkOWtl6mrifIkw9eAbA0M"
+UPLOAD_DIR = Path("uploads")
 
 
-def extract_drive_folder_id(value):
-    if not value:
-        return None
+def save_files_to_streamlit_storage(uploaded_files):
+    UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
+    saved = []
 
-    value = str(value).strip()
-    folder_match = re.search(r"/folders/([a-zA-Z0-9_-]+)", value)
-    if folder_match:
-        return folder_match.group(1)
+    for file in uploaded_files:
+        safe_name = Path(file.name).name
+        target_path = UPLOAD_DIR / safe_name
 
-    # If it's not a URL, assume user provided a raw folder ID.
-    return value
+        # Avoid accidental overwrite by appending a numeric suffix.
+        if target_path.exists():
+            stem = target_path.stem
+            suffix = target_path.suffix
+            index = 1
+            while target_path.exists():
+                target_path = UPLOAD_DIR / f"{stem}_{index}{suffix}"
+                index += 1
 
+        with open(target_path, "wb") as output_file:
+            output_file.write(file.getvalue())
 
-DRIVE_FOLDER_ID = extract_drive_folder_id(st.secrets.get("drive_folder_id", DEFAULT_DRIVE_FOLDER_ID))
+        saved.append(target_path.name)
 
-
-def get_drive_instance():
-    scope = ["https://www.googleapis.com/auth/drive"]
-
-    if os.path.exists("credentials.json"):
-        creds = ServiceAccountCredentials.from_json_keyfile_name("credentials.json", scope)
-    else:
-        creds_dict = None
-
-        # Preferred format in Streamlit Cloud secrets:
-        # [gcp_service_account]
-        # type = "service_account"
-        # project_id = "..."
-        if "gcp_service_account" in st.secrets:
-            creds_dict = dict(st.secrets["gcp_service_account"])
-
-        # Alternative format: one JSON string in secrets.
-        if creds_dict is None and "GOOGLE_SERVICE_ACCOUNT_JSON" in st.secrets:
-            creds_dict = json.loads(st.secrets["GOOGLE_SERVICE_ACCOUNT_JSON"])
-
-        if creds_dict is None:
-            raise FileNotFoundError(
-                "Lipseste credentials.json si nu exista secrets: gcp_service_account "
-                "sau GOOGLE_SERVICE_ACCOUNT_JSON."
-            )
-
-        creds = ServiceAccountCredentials.from_json_keyfile_dict(creds_dict, scope)
-
-    gauth = GoogleAuth()
-    gauth.credentials = creds
-    return GoogleDrive(gauth)
+    return saved
 
 
 def format_file_size(size_in_bytes):
@@ -373,11 +345,11 @@ def render_shell():
     st.markdown(
         """
         <div class="hero">
-            <div class="eyebrow"><span class="eyebrow-dot"></span> Google Drive Uploader</div>
-            <h1>Incarca fisiere direct in folderul tau din Drive.</h1>
+            <div class="eyebrow"><span class="eyebrow-dot"></span> Streamlit Upload Hub</div>
+            <h1>Incarca fisiere direct in spatiul aplicatiei tale.</h1>
             <p>
                 Interfata este gandita ca un dashboard curat si premium: incarci fisierele,
-                le trimiti catre folderul Drive configurat si uploadul se face imediat.
+                apesi butonul de upload si fisierele sunt salvate local in aplicatie.
             </p>
             <div class="hero-grid">
                 <div class="hero-card">
@@ -390,7 +362,7 @@ def render_shell():
                 </div>
                 <div class="hero-card">
                     <span>Destinatie</span>
-                    <strong>Google Drive, folder dedicat</strong>
+                    <strong>Storage local Streamlit (folder uploads)</strong>
                 </div>
             </div>
         </div>
@@ -446,67 +418,38 @@ if uploaded_files:
     st.markdown(
         """
         <div class="hint-box">
-            Dupa ce apesi pe buton, fisierele sunt trimise in folderul configurat din Google Drive.
-            Daca lipseste credentials.json sau folderul nu este setat corect, uploadul va esua.
+            Dupa ce apesi pe buton, fisierele sunt salvate in folderul local <strong>uploads</strong>
+            din aplicatie. Nu mai ai nevoie de credentiale Google Drive.
         </div>
         """,
         unsafe_allow_html=True,
     )
 
-    if st.button("Trimite totul pe Drive", use_container_width=True):
-        if DRIVE_FOLDER_ID == "ID_UL_FOLDERULUI_TAU_AICI":
-            st.error("Seteaza DRIVE_FOLDER_ID in main.py inainte sa folosesti uploadul.")
-        else:
-            try:
-                drive = get_drive_instance()
-                progress_bar = st.progress(0)
-                status = st.empty()
+    if st.button("Salveaza tot in Streamlit", use_container_width=True):
+        try:
+            progress_bar = st.progress(0)
+            status = st.empty()
 
-                for index, file in enumerate(uploaded_files):
-                    status.markdown(
-                        f"<div class='footer-note'>Se incarca: <strong>{html.escape(file.name)}</strong></div>",
-                        unsafe_allow_html=True,
-                    )
-
-                    file_data = file.getvalue()
-                    temp_file_path = None
-
-                    with tempfile.NamedTemporaryFile(delete=False) as temp_file:
-                        temp_file.write(file_data)
-                        temp_file_path = temp_file.name
-
-                    try:
-                        gfile = drive.CreateFile(
-                            {
-                                "title": file.name,
-                                "parents": [{"id": DRIVE_FOLDER_ID}],
-                            }
-                        )
-
-                        gfile.SetContentFile(temp_file_path)
-                        gfile.Upload()
-                        progress_bar.progress((index + 1) / len(uploaded_files))
-                    finally:
-                        if temp_file_path and os.path.exists(temp_file_path):
-                            os.unlink(temp_file_path)
-
-                status.empty()
-                st.success(f"Am incarcat {len(uploaded_files)} fisiere.")
-            except FileNotFoundError:
-                st.error(
-                    "Nu gasesc credentialele Google. Pe Streamlit Cloud adauga in Secrets "
-                    "[gcp_service_account] sau GOOGLE_SERVICE_ACCOUNT_JSON."
+            for index, file in enumerate(uploaded_files):
+                status.markdown(
+                    f"<div class='footer-note'>Se salveaza: <strong>{html.escape(file.name)}</strong></div>",
+                    unsafe_allow_html=True,
                 )
-            except Exception as error:
-                st.error(f"Eroare la incarcare: {error}")
+                progress_bar.progress((index + 1) / len(uploaded_files))
+
+            saved_files = save_files_to_streamlit_storage(uploaded_files)
+            status.empty()
+            st.success(f"Am salvat {len(saved_files)} fisiere in folderul uploads.")
+        except Exception as error:
+            st.error(f"Eroare la salvare: {error}")
 else:
     st.markdown(
         """
         <div class="panel">
             <div class="section-title">Upload simplu</div>
             <div class="footer-note">
-                Selecteaza unul sau mai multe fisiere. Apoi le poti trimite direct in Google Drive,
-                in folderul pe care l-ai configurat in aplicatie.
+                Selecteaza unul sau mai multe fisiere. Apoi le poti salva direct in aplicatie,
+                in folderul local uploads.
             </div>
         </div>
         """,
@@ -516,8 +459,8 @@ else:
 st.markdown(
     """
     <div class="hint-box" style="margin-top: 1.2rem;">
-        Fisierele sunt incarcate direct in Google Drive. Foloseste acelasi service account
-        si un folder dedicat pentru o organizare mai buna.
+        Fisierele raman pe Streamlit in storage local. Daca aplicatia se restarteaza pe Cloud,
+        fisierele locale pot fi sterse, deci foloseste un backup daca ai nevoie de persistenta.
     </div>
     """,
     unsafe_allow_html=True,
