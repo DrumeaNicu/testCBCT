@@ -21,7 +21,19 @@ DRIVE_FOLDER_ID = "1SR5ynLevtLLtkOWtl6mrifIkw9eAbA0M"
 
 def get_drive_instance():
     scope = ["https://www.googleapis.com/auth/drive"]
-    creds = ServiceAccountCredentials.from_json_keyfile_name("credentials.json", scope)
+
+    if os.path.exists("credentials.json"):
+        creds = ServiceAccountCredentials.from_json_keyfile_name("credentials.json", scope)
+    else:
+        # On Streamlit Cloud, prefer secrets over local files.
+        if "gcp_service_account" in st.secrets:
+            creds_dict = dict(st.secrets["gcp_service_account"])
+            creds = ServiceAccountCredentials.from_json_keyfile_dict(creds_dict, scope)
+        else:
+            raise FileNotFoundError(
+                "Lipseste credentials.json si nu exista gcp_service_account in Streamlit secrets."
+            )
+
     gauth = GoogleAuth()
     gauth.credentials = creds
     return GoogleDrive(gauth)
