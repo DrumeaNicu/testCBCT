@@ -1,4 +1,5 @@
 import html
+import json
 import os
 import tempfile
 
@@ -25,14 +26,26 @@ def get_drive_instance():
     if os.path.exists("credentials.json"):
         creds = ServiceAccountCredentials.from_json_keyfile_name("credentials.json", scope)
     else:
-        # On Streamlit Cloud, prefer secrets over local files.
+        creds_dict = None
+
+        # Preferred format in Streamlit Cloud secrets:
+        # [gcp_service_account]
+        # type = "service_account"
+        # project_id = "..."
         if "gcp_service_account" in st.secrets:
             creds_dict = dict(st.secrets["gcp_service_account"])
-            creds = ServiceAccountCredentials.from_json_keyfile_dict(creds_dict, scope)
-        else:
+
+        # Alternative format: one JSON string in secrets.
+        if creds_dict is None and "GOOGLE_SERVICE_ACCOUNT_JSON" in st.secrets:
+            creds_dict = json.loads(st.secrets["GOOGLE_SERVICE_ACCOUNT_JSON"])
+
+        if creds_dict is None:
             raise FileNotFoundError(
-                "Lipseste credentials.json si nu exista gcp_service_account in Streamlit secrets."
+                "Lipseste credentials.json si nu exista secrets: gcp_service_account "
+                "sau GOOGLE_SERVICE_ACCOUNT_JSON."
             )
+
+        creds = ServiceAccountCredentials.from_json_keyfile_dict(creds_dict, scope)
 
     gauth = GoogleAuth()
     gauth.credentials = creds
@@ -463,7 +476,10 @@ if uploaded_files:
                 status.empty()
                 st.success(f"Am incarcat {len(uploaded_files)} fisiere.")
             except FileNotFoundError:
-                st.error("Nu gasesc credentials.json langa main.py.")
+                st.error(
+                    "Nu gasesc credentialele Google. Pe Streamlit Cloud adauga in Secrets "
+                    "[gcp_service_account] sau GOOGLE_SERVICE_ACCOUNT_JSON."
+                )
             except Exception as error:
                 st.error(f"Eroare la incarcare: {error}")
 else:
