@@ -1,6 +1,7 @@
 import html
 import json
 import os
+import re
 import tempfile
 
 import streamlit as st
@@ -10,14 +11,30 @@ from oauth2client.service_account import ServiceAccountCredentials
 
 
 st.set_page_config(
-    page_title="Upload Hub",
+    page_title="Google Drive Uploader",
     page_icon="UH",
     layout="wide",
     initial_sidebar_state="collapsed",
 )
 
 
-DRIVE_FOLDER_ID = "1SR5ynLevtLLtkOWtl6mrifIkw9eAbA0M"
+DEFAULT_DRIVE_FOLDER_ID = "1SR5ynLevtLLtkOWtl6mrifIkw9eAbA0M"
+
+
+def extract_drive_folder_id(value):
+    if not value:
+        return None
+
+    value = str(value).strip()
+    folder_match = re.search(r"/folders/([a-zA-Z0-9_-]+)", value)
+    if folder_match:
+        return folder_match.group(1)
+
+    # If it's not a URL, assume user provided a raw folder ID.
+    return value
+
+
+DRIVE_FOLDER_ID = extract_drive_folder_id(st.secrets.get("drive_folder_id", DEFAULT_DRIVE_FOLDER_ID))
 
 
 def get_drive_instance():
@@ -356,11 +373,11 @@ def render_shell():
     st.markdown(
         """
         <div class="hero">
-            <div class="eyebrow"><span class="eyebrow-dot"></span> GPU Pipeline Upload Hub</div>
-            <h1>Un singur loc pentru fisierele care pleaca spre Drive.</h1>
+            <div class="eyebrow"><span class="eyebrow-dot"></span> Google Drive Uploader</div>
+            <h1>Incarca fisiere direct in folderul tau din Drive.</h1>
             <p>
                 Interfata este gandita ca un dashboard curat si premium: incarci fisierele,
-                le trimiti catre folderul Drive configurat si lasi backend-ul GPU sa le preia automat.
+                le trimiti catre folderul Drive configurat si uploadul se face imediat.
             </p>
             <div class="hero-grid">
                 <div class="hero-card">
@@ -486,10 +503,10 @@ else:
     st.markdown(
         """
         <div class="panel">
-            <div class="section-title">Fluxul tau</div>
+            <div class="section-title">Upload simplu</div>
             <div class="footer-note">
                 Selecteaza unul sau mai multe fisiere. Apoi le poti trimite direct in Google Drive,
-                in folderul dedicat pentru pipeline.
+                in folderul pe care l-ai configurat in aplicatie.
             </div>
         </div>
         """,
@@ -499,8 +516,8 @@ else:
 st.markdown(
     """
     <div class="hint-box" style="margin-top: 1.2rem;">
-        Backend-ul GPU poate citi fisierele imediat ce apar in Drive. Pastreaza folderul de destinatie
-        separat si foloseste acelasi service account pentru acces stabil.
+        Fisierele sunt incarcate direct in Google Drive. Foloseste acelasi service account
+        si un folder dedicat pentru o organizare mai buna.
     </div>
     """,
     unsafe_allow_html=True,
